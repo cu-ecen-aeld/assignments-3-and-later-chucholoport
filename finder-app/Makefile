@@ -3,10 +3,10 @@ CFLAGS = -Wall -Wextra -Werror -g
 TARGET = writer
 SRC = writer.c
 
-writer: $(SRC)
+$(TARGET): $(SRC)
 	$(CC) $(CFLAGS) -o $(TARGET) $(SRC)
 
 clean:
 	rm -rf *.o $(TARGET)
 
-.PHONY: writer clean
+.PHONY: $(TARGET) clean
