@@ -17,7 +17,9 @@ bool do_system(const char *cmd)
  *   or false() if it returned a failure
 */
 
-    return true;
+    int system_call_status = system(cmd);
+
+    return system_call_status == -1 ? false : true;
 }
 
 /**
@@ -59,9 +61,68 @@ bool do_exec(int count, ...)
  *
 */
 
-    va_end(args);
+    bool do_exec_result = false;
 
-    return true;
+    /* Fork: creates a new process by duplicating the calling process. */
+    pid_t pid = fork();
+
+    /* On failure, -1 is returned in the parent, no child process is created, 
+       and errno is set to indicate the error. */
+    if (pid == -1) 
+    {
+        syslog(LOG_ERR, "Error on fork step: %s", strerror(errno));
+        
+        va_end(args);
+
+        exit(EXIT_FAILURE);
+    } 
+    /* On success, the PID of the child process is returned in the
+       parent, and 0 is returned in the child. */
+    else if (pid == 0) 
+    {
+        /* Execv: Replace child process image with execv with new process image */
+        execv(command[0], command);
+        
+        /* The exec() functions only return if an error has occurred. 
+           The return value is -1, and errno is set to indicate the error. */
+        syslog(LOG_ERR, "Error on execv step: %s", strerror(errno));
+        
+        exit(EXIT_FAILURE);
+    }
+    else 
+    {
+        int status;
+
+        /* Waitpid: suspends execution of the calling process until state changes */
+        if (waitpid(pid, &status, 0) == -1)
+        {
+            /* on error, -1 is returned. Each of these calls sets errno 
+               to an appropriate value in the case of an error. */
+            syslog(LOG_ERR, "Error on waitpid step: %s", strerror(errno));
+            
+            do_exec_result = false;
+        }
+
+        /* on success, returns the process ID of the child whose state has changed; 
+           if WNOHANG was specified and one or more child(ren) specified by pid exist, 
+           but have not yet changed state, then 0 is returned. */
+        if (status == 0) 
+        {
+            do_exec_result = true;
+        }
+        else 
+        {
+            syslog(LOG_ERR, "Command failed. Status code: %d", status);
+            
+            do_exec_result = false;
+        }
+
+        va_end(args);
+        
+        return do_exec_result;
+
+    }
+
 }
 
 /**
@@ -92,7 +153,96 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    bool do_exec_result = false;    
 
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    
+    if (fd < 0) 
+    { 
+        syslog(LOG_ERR, "Unable to open %s: %s", outputfile, strerror(errno));
+        
+        va_end(args);
+
+        return do_exec_result;
+    }
+
+    /* Fork: creates a new process by duplicating the calling process. */
+    pid_t pid = fork();
+
+    /* On failure, -1 is returned in the parent, no child process is created, 
+       and errno is set to indicate the error. */
+    if (pid == -1) 
+    {
+        syslog(LOG_ERR, "Error on fork step: %s", strerror(errno));
+        
+        close(fd);
+    
+        va_end(args);
+
+        exit(EXIT_FAILURE);
+    } 
+    /* On success, the PID of the child process is returned in the
+       parent, and 0 is returned in the child. */
+    else if (pid == 0) 
+    {
+        if (dup2(fd, STDOUT_FILENO) < 0) 
+        { 
+            syslog(LOG_ERR, "Error on dup2 %d step: %s", fd, strerror(errno)); 
+            
+            close(fd);
+
+            va_end(args);
+
+            exit(EXIT_FAILURE);
+        }
+        
+        close(fd);
+
+        /* Execv: Replace child process image with execv with new process image */
+        execvp(command[0], command);
+        
+        /* The exec() functions only return if an error has occurred. 
+           The return value is -1, and errno is set to indicate the error. */
+        syslog(LOG_ERR, "Error on execv step: %s", strerror(errno));
+        
+        exit(EXIT_FAILURE);
+    }
+    else 
+    {
+        close(fd);
+
+        int status;
+
+        /* Waitpid: suspends execution of the calling process until state changes */
+        if (waitpid(pid, &status, 0) == -1)
+        {
+            /* on error, -1 is returned. Each of these calls sets errno 
+               to an appropriate value in the case of an error. */
+            syslog(LOG_ERR, "Error on waitpid step: %s", strerror(errno));
+            
+            do_exec_result = false;
+        }
+
+        /* on success, returns the process ID of the child whose state has changed; 
+           if WNOHANG was specified and one or more child(ren) specified by pid exist, 
+           but have not yet changed state, then 0 is returned. */
+        if (status == 0) 
+        {
+            do_exec_result = true;
+        }
+        else 
+        {
+            syslog(LOG_ERR, "Command failed. Status code: %d", status);
+            
+            do_exec_result = false;
+        }
+
+        va_end(args);
+        
+        return do_exec_result;
+
+    }
+    
     va_end(args);
 
     return true;
